@@ -1,0 +1,6 @@
+customer_id,ticket_ref,subject,status
+1001,TCK-1,Login issue,open
+1002,TCK-2,Billing question,closed
+1003,TCK-3,Feature request,open
+1004,TCK-4,Password reset,closed
+1005,TCK-5,API access,open

@@ -1,0 +1,29 @@
+[project]
+name = "conduitai-backend"
+version = "0.1.0"
+description = "ConduitAI backend - AI-assisted customer data onboarding pipeline"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.32.0",
+    "sqlmodel>=0.0.22",
+    "psycopg[binary]>=3.2.0",
+    "alembic>=1.14.0",
+    "pydantic-settings>=2.6.0",
+    "python-multipart>=0.0.12",
+    "charset-normalizer>=3.4.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3.0",
+    "httpx>=0.27.0",
+    "faker>=33.0.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["app", "seed"]

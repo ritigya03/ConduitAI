@@ -1,0 +1,6 @@
+customer_id,first_name,last_name,email
+C-1001,Ada,Lovelace,ada@example.com
+C-1002,Grace,Hopper,grace@example.com
+C-1003,Alan,Turing,alan@example.com
+C-1004,Katherine,Johnson,katherine@example.com
+C-1005,Margaret,Hamilton,margaret@example.com
