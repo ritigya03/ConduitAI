@@ -20,6 +20,8 @@ dependencies = [
     "rapidfuzz>=3.10.0",
     "fastembed>=0.4.0",
     "numpy>=1.26.0",
+    "instructor>=1.6.0",
+    "openai>=1.50.0",
 ]
 
 [dependency-groups]

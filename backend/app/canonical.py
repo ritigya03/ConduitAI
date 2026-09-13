@@ -54,7 +54,7 @@ CANONICAL_FIELDS: list[CanonicalField] = [
         type=FieldType.STRING,
         required=True,
         description="The customer's full legal or registered company name.",
-        aliases=["company_name", "name", "compname", "legal_name", "account_name"],
+        aliases=["company_name", "compname", "legal_name", "account_name"],
     ),
     CanonicalField(
         name="display_name",

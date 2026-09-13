@@ -31,10 +31,19 @@ _AUTO_ACCEPT_THRESHOLD = 0.85
 _HUMAN_CONFIRM_THRESHOLD = 0.55
 
 _SOURCE_KIND_TO_TABLES: dict[str, list[str]] = {
-    "crm": ["customers", "accounts"],
+    "crm": ["customers"],
     "billing": ["invoices"],
     "support": ["support_tickets"],
 }
+
+# account_number is a legitimately cross-cutting field — crm, billing, and
+# support sources can all reference it. Including the *whole* accounts
+# table per source_kind (an earlier version of this fix) was too broad: it
+# also pulled in account_status/account_opened_at, which collide with
+# support_tickets' near-identical status/opened_at fields and made the
+# scorer worse on those columns, not better. Only the one field that's
+# actually needed is added here.
+_CROSS_CUTTING_FIELD_NAMES = {"account_number"}
 
 _EMBEDDING_MODEL_NAME = "BAAI/bge-small-en-v1.5"
 
@@ -75,7 +84,7 @@ def _field_embeddings() -> dict[str, list[float]]:
 
 
 def _normalize_column_name(name: str) -> str:
-    split_camel = re.sub(r"(?<!^)(?=[A-Z])", " ", name)
+    split_camel = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", " ", name)
     return split_camel.replace("_", " ").replace("-", " ").lower().strip()
 
 
@@ -123,11 +132,15 @@ def type_format_score(stats: ColumnStats, field_type: FieldType) -> float:
     return 0.5  # STRING: no strong type signal either way
 
 
-def _candidate_pool(source_kind: str | None) -> list[CanonicalField]:
+def candidate_pool(source_kind: str | None) -> list[CanonicalField]:
     tables = _SOURCE_KIND_TO_TABLES.get(source_kind) if source_kind else None
     if tables is None:
         return CANONICAL_FIELDS
-    return [field for field in CANONICAL_FIELDS if field.target_table in tables]
+    return [
+        field
+        for field in CANONICAL_FIELDS
+        if field.target_table in tables or field.name in _CROSS_CUTTING_FIELD_NAMES
+    ]
 
 
 def bucket_for(confidence: float) -> str:
@@ -141,7 +154,7 @@ def bucket_for(confidence: float) -> str:
 def score_column(
     column_name: str, stats: ColumnStats, source_kind: str | None
 ) -> ColumnMapping:
-    pool = _candidate_pool(source_kind)
+    pool = candidate_pool(source_kind)
     field_vectors = _field_embeddings()
     column_embedding = _embed([_describe_column(column_name, stats)])[0]
 

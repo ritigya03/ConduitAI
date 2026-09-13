@@ -35,3 +35,14 @@ def test_fields_for_table_filters_correctly():
 def test_registry_covers_all_four_canonical_tables():
     tables = {f.target_table for f in CANONICAL_FIELDS}
     assert tables == {"customers", "accounts", "invoices", "support_tickets"}
+
+
+def test_legal_name_has_no_bare_generic_alias():
+    """Regression test: a bare "name" alias on legal_name caused rapidfuzz's
+    token_set_ratio to score a perfect (1.0) subset match against ANY
+    column containing the substring "name" — e.g. "first_name",
+    "last_name", "display_name" — all wrongly matched legal_name with high
+    confidence, deterministically, before app.scoring's LLM tie-break ever
+    got a chance (it only runs for the "unmapped" bucket)."""
+    field = get_field("legal_name")
+    assert "name" not in field.aliases

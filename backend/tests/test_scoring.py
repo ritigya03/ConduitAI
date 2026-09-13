@@ -104,3 +104,27 @@ def test_score_column_ranks_exact_alias_match_highest_with_stubbed_embeddings(mo
     assert mapping.candidates == sorted(
         mapping.candidates, key=lambda c: c.confidence, reverse=True
     )
+
+
+def test_name_similarity_handles_all_caps_column_name():
+    """Regression test: the old camelCase-split regex (?<!^)(?=[A-Z]) split
+    every uppercase letter, so "PHONE" became "p h o n e" (5 single-letter
+    tokens) instead of staying one word — badly hurting the fuzzy match
+    against legacy all-caps headers like crm_legacy.csv's PHONE, DISPNAME,
+    DT_CREATE."""
+    field = get_field("customer_phone")
+    assert name_similarity("PHONE", field) == 1.0
+
+
+def test_candidate_pool_includes_accounts_for_billing_and_support():
+    """Regression test: account_number is an accounts-table field, but the
+    billing/support candidate pools excluded the accounts table entirely —
+    meaning billing.csv's and support.csv's account_number columns could
+    never be mapped correctly by any signal, since the right field wasn't
+    even a candidate."""
+    from app.scoring import candidate_pool
+
+    billing_names = {f.name for f in candidate_pool("billing")}
+    support_names = {f.name for f in candidate_pool("support")}
+    assert "account_number" in billing_names
+    assert "account_number" in support_names
