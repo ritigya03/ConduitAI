@@ -1,0 +1,96 @@
+"""POST /profile — column profiling + deterministic mapping proposal.
+
+Orchestrates app.profiling, app.report, and app.scoring against an
+already-uploaded batch's raw_records. No LLM calls, no MappingSpec
+persisted here — see app.scoring's module docstring for why.
+"""
+
+from uuid import UUID
+
+from fastapi import APIRouter, Depends, Form, HTTPException
+from sqlmodel import Session, select
+
+from app.db import get_session
+from app.models import ColumnProfile, OnboardingBatch, RawRecord, Source
+from app.profiling import build_dataframe, profile_all_columns
+from app.report import generate_report
+from app.scoring import score_all_columns
+
+router = APIRouter()
+
+
+@router.post("/profile")
+def profile_batch(
+    tenant_id: str = Form(...),
+    batch_id: str = Form(...),
+    session: Session = Depends(get_session),
+):
+    try:
+        batch_uuid = UUID(batch_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="batch_id must be a valid UUID")
+
+    batch = session.get(OnboardingBatch, batch_uuid)
+    if batch is None or batch.tenant_id != tenant_id:
+        raise HTTPException(status_code=404, detail="Batch not found")
+
+    raw_rows = session.exec(
+        select(RawRecord).where(RawRecord.batch_id == batch.id)
+    ).all()
+    if not raw_rows:
+        raise HTTPException(status_code=400, detail="Batch has no raw records")
+
+    source = session.get(Source, batch.source_id)
+    source_kind = source.kind if source else None
+
+    df = build_dataframe([row.raw_json for row in raw_rows])
+    stats_list = profile_all_columns(df)
+    stats_by_column = {stats.column_name: stats for stats in stats_list}
+
+    mappings_by_column = {
+        mapping.column_name: mapping
+        for mapping in score_all_columns(stats_by_column, source_kind)
+    }
+
+    report_path = generate_report(df, str(batch.id))
+
+    columns_response = []
+    for stats in stats_list:
+        mapping = mappings_by_column[stats.column_name]
+        profile_json = {"stats": stats.model_dump(), "mapping": mapping.model_dump()}
+
+        existing = session.exec(
+            select(ColumnProfile).where(
+                ColumnProfile.batch_id == batch.id,
+                ColumnProfile.column_name == stats.column_name,
+            )
+        ).first()
+        if existing is not None:
+            existing.profile_json = profile_json
+            session.add(existing)
+        else:
+            session.add(
+                ColumnProfile(
+                    batch_id=batch.id,
+                    column_name=stats.column_name,
+                    profile_json=profile_json,
+                )
+            )
+
+        columns_response.append(
+            {
+                "column_name": stats.column_name,
+                "stats": stats.model_dump(),
+                "candidates": [c.model_dump() for c in mapping.candidates],
+                "best_field": mapping.best_field,
+                "bucket": mapping.bucket,
+            }
+        )
+
+    session.commit()
+
+    return {
+        "batch_id": str(batch.id),
+        "columns": columns_response,
+        "report_path": str(report_path),
+    }

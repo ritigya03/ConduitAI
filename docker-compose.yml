@@ -29,6 +29,7 @@ services:
     volumes:
       - ./backend/app:/code/app
       - ./backend/alembic:/code/alembic
+      - ./backend/reports:/code/reports
 
 volumes:
   conduit_pgdata:
