@@ -22,6 +22,7 @@ dependencies = [
     "numpy>=1.26.0",
     "instructor>=1.6.0",
     "openai>=1.50.0",
+    "pandera>=0.20.0",
 ]
 
 [dependency-groups]
