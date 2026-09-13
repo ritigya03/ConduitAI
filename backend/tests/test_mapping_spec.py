@@ -1,8 +1,18 @@
+from uuid import UUID
+
+import pytest
 from sqlmodel import Session
 
 from app.db import engine
 from app.llm_mapper import LLMDecision
-from app.mapping_spec import build_spec_entries, next_version, save_mapping_spec
+from app.mapping_spec import (
+    MappingSpecNotDraft,
+    MappingSpecNotFound,
+    build_spec_entries,
+    confirm_mapping_spec,
+    next_version,
+    save_mapping_spec,
+)
 from app.models import MappingSpec, Source
 from app.scoring import ColumnMapping, MappingCandidate
 
@@ -125,3 +135,65 @@ def test_save_mapping_spec_persists_draft_row(unique_tenant_id):
 
         fetched = session.get(MappingSpec, spec.id)
         assert fetched is not None
+
+
+def test_confirm_mapping_spec_sets_status_confirmed(unique_tenant_id):
+    with Session(engine) as session:
+        source = Source(tenant_id=unique_tenant_id, name="crm", kind="crm")
+        session.add(source)
+        session.commit()
+        session.refresh(source)
+
+        spec = save_mapping_spec(session, unique_tenant_id, source.id, {})
+        confirmed = confirm_mapping_spec(session, unique_tenant_id, spec.id)
+
+        assert confirmed.status == "confirmed"
+        assert session.get(MappingSpec, spec.id).status == "confirmed"
+
+
+def test_confirm_mapping_spec_supersedes_previous_confirmed_version(unique_tenant_id):
+    with Session(engine) as session:
+        source = Source(tenant_id=unique_tenant_id, name="crm", kind="crm")
+        session.add(source)
+        session.commit()
+        session.refresh(source)
+
+        v1 = save_mapping_spec(session, unique_tenant_id, source.id, {})
+        confirm_mapping_spec(session, unique_tenant_id, v1.id)
+
+        v2 = save_mapping_spec(session, unique_tenant_id, source.id, {})
+        confirm_mapping_spec(session, unique_tenant_id, v2.id)
+
+        assert session.get(MappingSpec, v1.id).status == "superseded"
+        assert session.get(MappingSpec, v2.id).status == "confirmed"
+
+
+def test_confirm_mapping_spec_raises_for_unknown_id(unique_tenant_id):
+    with Session(engine) as session:
+        with pytest.raises(MappingSpecNotFound):
+            confirm_mapping_spec(session, unique_tenant_id, UUID(int=0))
+
+
+def test_confirm_mapping_spec_raises_for_wrong_tenant(unique_tenant_id):
+    with Session(engine) as session:
+        source = Source(tenant_id=unique_tenant_id, name="crm", kind="crm")
+        session.add(source)
+        session.commit()
+        session.refresh(source)
+        spec = save_mapping_spec(session, unique_tenant_id, source.id, {})
+
+        with pytest.raises(MappingSpecNotFound):
+            confirm_mapping_spec(session, "someone-elses-tenant", spec.id)
+
+
+def test_confirm_mapping_spec_raises_if_already_confirmed(unique_tenant_id):
+    with Session(engine) as session:
+        source = Source(tenant_id=unique_tenant_id, name="crm", kind="crm")
+        session.add(source)
+        session.commit()
+        session.refresh(source)
+        spec = save_mapping_spec(session, unique_tenant_id, source.id, {})
+        confirm_mapping_spec(session, unique_tenant_id, spec.id)
+
+        with pytest.raises(MappingSpecNotDraft):
+            confirm_mapping_spec(session, unique_tenant_id, spec.id)

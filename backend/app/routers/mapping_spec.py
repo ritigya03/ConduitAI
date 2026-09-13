@@ -12,7 +12,13 @@ from sqlmodel import Session, select
 
 from app.db import get_session
 from app.llm_mapper import LLMDecision, tiebreak
-from app.mapping_spec import build_spec_entries, save_mapping_spec
+from app.mapping_spec import (
+    MappingSpecNotDraft,
+    MappingSpecNotFound,
+    build_spec_entries,
+    confirm_mapping_spec,
+    save_mapping_spec,
+)
 from app.models import OnboardingBatch, RawRecord, Source
 from app.profiling import build_dataframe, profile_all_columns
 from app.scoring import candidate_pool, score_all_columns
@@ -67,4 +73,34 @@ def create_mapping_spec(
         "parent_version": spec.parent_version,
         "status": spec.status,
         "spec_json": spec.spec_json,
+    }
+
+
+@router.post("/mapping-spec/{mapping_spec_id}/confirm")
+def confirm_mapping_spec_route(
+    mapping_spec_id: str,
+    tenant_id: str = Form(...),
+    session: Session = Depends(get_session),
+):
+    """The human-review action: promotes a draft mapping spec to
+    "confirmed" (superseding whatever was previously confirmed for that
+    source). This is the only place in Day 1-3 a spec ever leaves
+    "draft" — Day 4's transform engine should read the confirmed spec,
+    not the latest draft."""
+    try:
+        spec_uuid = UUID(mapping_spec_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="mapping_spec_id must be a valid UUID")
+
+    try:
+        spec = confirm_mapping_spec(session, tenant_id, spec_uuid)
+    except MappingSpecNotFound:
+        raise HTTPException(status_code=404, detail="Mapping spec not found")
+    except MappingSpecNotDraft as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+
+    return {
+        "mapping_spec_id": str(spec.id),
+        "version": spec.version,
+        "status": spec.status,
     }

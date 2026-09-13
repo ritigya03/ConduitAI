@@ -18,6 +18,14 @@ from app.llm_mapper import LLMDecision
 from app.models import MappingSpec
 from app.scoring import ColumnMapping
 
+class MappingSpecNotFound(Exception):
+    """No mapping spec with that id belongs to that tenant."""
+
+
+class MappingSpecNotDraft(Exception):
+    """Only a "draft" spec can be confirmed — it's already confirmed or superseded."""
+
+
 _TRANSFORM_BY_FIELD_TYPE: dict[FieldType, dict] = {
     FieldType.STRING: {"function": "trim", "params": {}},
     FieldType.EMAIL: {"function": "trim", "params": {}},
@@ -102,6 +110,37 @@ def save_mapping_spec(
         status="draft",
         parent_version=parent_version,
     )
+    session.add(spec)
+    session.commit()
+    session.refresh(spec)
+    return spec
+
+
+def confirm_mapping_spec(
+    session: Session, tenant_id: str, mapping_spec_id: UUID
+) -> MappingSpec:
+    """Promotes a "draft" spec to "confirmed" — the human-review action
+    Day 5's UI performs. Any other spec already "confirmed" for the same
+    (tenant, source) is marked "superseded" first, so at most one
+    confirmed version exists per source at a time."""
+    spec = session.get(MappingSpec, mapping_spec_id)
+    if spec is None or spec.tenant_id != tenant_id:
+        raise MappingSpecNotFound(f"No mapping spec {mapping_spec_id} for tenant {tenant_id}")
+    if spec.status != "draft":
+        raise MappingSpecNotDraft(f"Mapping spec {mapping_spec_id} is {spec.status!r}, not draft")
+
+    previously_confirmed = session.exec(
+        select(MappingSpec).where(
+            MappingSpec.tenant_id == tenant_id,
+            MappingSpec.source_id == spec.source_id,
+            MappingSpec.status == "confirmed",
+        )
+    ).all()
+    for other in previously_confirmed:
+        other.status = "superseded"
+        session.add(other)
+
+    spec.status = "confirmed"
     session.add(spec)
     session.commit()
     session.refresh(spec)

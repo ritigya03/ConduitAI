@@ -123,3 +123,40 @@ def test_mapping_spec_invalid_batch_id_returns_400(unique_tenant_id):
         "/mapping-spec", data={"tenant_id": unique_tenant_id, "batch_id": "not-a-uuid"}
     )
     assert response.status_code == 400
+
+
+def test_confirm_mapping_spec_marks_it_confirmed(unique_tenant_id):
+    batch_id = _upload_tiny_crm(unique_tenant_id)
+    create_response = client.post(
+        "/mapping-spec", data={"tenant_id": unique_tenant_id, "batch_id": batch_id}
+    )
+    spec_id = create_response.json()["mapping_spec_id"]
+
+    response = client.post(
+        f"/mapping-spec/{spec_id}/confirm", data={"tenant_id": unique_tenant_id}
+    )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "confirmed"
+
+
+def test_confirm_mapping_spec_twice_returns_409(unique_tenant_id):
+    batch_id = _upload_tiny_crm(unique_tenant_id)
+    create_response = client.post(
+        "/mapping-spec", data={"tenant_id": unique_tenant_id, "batch_id": batch_id}
+    )
+    spec_id = create_response.json()["mapping_spec_id"]
+    client.post(f"/mapping-spec/{spec_id}/confirm", data={"tenant_id": unique_tenant_id})
+
+    response = client.post(
+        f"/mapping-spec/{spec_id}/confirm", data={"tenant_id": unique_tenant_id}
+    )
+    assert response.status_code == 409
+
+
+def test_confirm_unknown_mapping_spec_returns_404(unique_tenant_id):
+    response = client.post(
+        "/mapping-spec/00000000-0000-0000-0000-000000000000/confirm",
+        data={"tenant_id": unique_tenant_id},
+    )
+    assert response.status_code == 404
