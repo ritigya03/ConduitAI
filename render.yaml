@@ -1,0 +1,34 @@
+services:
+  - type: web
+    name: conduitai-api
+    runtime: docker
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    plan: free
+    envVars:
+      - key: DATABASE_URL
+        sync: false # paste your Neon connection string in the Render dashboard
+      - key: GROQ_API_KEY
+        sync: false # console.groq.com, free, no card
+      - key: MOCK_CRM_BASE_URL
+        # Render service URLs are deterministic: https://<name>.onrender.com.
+        # Hardcoded rather than a fromService reference -- private networking
+        # between services isn't guaranteed on the free plan, and the public
+        # URL always works regardless.
+        value: https://conduitai-mock-crm.onrender.com
+      - key: MOCK_CRM_API_TOKEN
+        value: mock-crm-demo-token
+      - key: ENVIRONMENT
+        value: production
+      - key: CORS_ALLOWED_ORIGINS
+        sync: false # set to your Vercel URL once the frontend is deployed (Step 4 of docs/DEPLOY.md)
+
+  - type: web
+    name: conduitai-mock-crm
+    runtime: docker
+    dockerfilePath: ./mock-crm/Dockerfile
+    dockerContext: ./mock-crm
+    plan: free
+    envVars:
+      - key: MOCK_CRM_API_TOKEN
+        value: mock-crm-demo-token

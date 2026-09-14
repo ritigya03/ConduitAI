@@ -43,10 +43,27 @@ function subscribe(callback: () => void): () => void {
 
 const EMPTY: RecentBatch[] = [];
 
+// useSyncExternalStore requires getSnapshot to return a *stable*
+// reference when the underlying store hasn't changed -- listRecentBatches()
+// parses JSON fresh every call, so a new array every render reads as "it
+// changed" and loops forever. Cache the parsed array, keyed on the raw
+// string, and only reparse when the raw value actually differs.
+let cachedRaw: string | null | undefined;
+let cachedSnapshot: RecentBatch[] = EMPTY;
+
+function getSnapshot(): RecentBatch[] {
+  if (typeof window === "undefined") return EMPTY;
+  const raw = window.localStorage.getItem(STORAGE_KEY);
+  if (raw === cachedRaw) return cachedSnapshot;
+  cachedRaw = raw;
+  cachedSnapshot = listRecentBatches();
+  return cachedSnapshot;
+}
+
 /** localStorage is an external mutable store, not React state -- read it
  * through useSyncExternalStore (not useEffect+useState) so the server
  * snapshot ([]) and first client render agree and there's no hydration
  * mismatch or setState-in-effect cascade. */
 export function useRecentBatches(): RecentBatch[] {
-  return useSyncExternalStore(subscribe, listRecentBatches, () => EMPTY);
+  return useSyncExternalStore(subscribe, getSnapshot, () => EMPTY);
 }

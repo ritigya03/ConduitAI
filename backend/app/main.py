@@ -2,6 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
+from app.config import settings
 from app.report import REPORTS_DIR
 from app.routers.connect import router as connect_router
 from app.routers.dedupe import router as dedupe_router
@@ -16,7 +17,7 @@ app = FastAPI(title="ConduitAI")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
+    allow_origins=settings.cors_allowed_origins_list,
     allow_methods=["*"],
     allow_headers=["*"],
 )

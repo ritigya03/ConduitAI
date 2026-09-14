@@ -9,3 +9,5 @@ mock-crm/__pycache__/
 mock-crm/**/__pycache__/
 mock-crm/.pytest_cache/
 .env
+.env.*
+!.env.example

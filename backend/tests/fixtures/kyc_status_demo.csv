@@ -1,0 +1,4 @@
+customer_id,company_name,kyc_status
+K-1,Acme Verified Co,verified
+K-2,Acme Pending Co,
+K-3,Acme Rejected Co,rejected

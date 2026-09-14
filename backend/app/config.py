@@ -11,6 +11,14 @@ class Settings(BaseSettings):
     ollama_base_url: str = "http://localhost:11434/v1"
     mock_crm_base_url: str = "http://localhost:8100"
     mock_crm_api_token: str = "mock-crm-demo-token"
+    # Comma-separated. Deployed frontend origins (e.g. the Vercel URL) go
+    # here via the CORS_ALLOWED_ORIGINS env var -- local dev's default
+    # covers itself without any config needed.
+    cors_allowed_origins: str = "http://localhost:3000"
+
+    @property
+    def cors_allowed_origins_list(self) -> list[str]:
+        return [origin.strip() for origin in self.cors_allowed_origins.split(",") if origin.strip()]
 
 
 settings = Settings()
