@@ -51,7 +51,30 @@ def validate_schema(target_table: str, values: dict) -> list[FieldError]:
     import pandas as pd
 
     schema = _get_schema(target_table)
-    row = {name: [values.get(name)] for name in schema.columns}
+    # Only check columns `values` actually has an entry for -- not every
+    # column ever registered for this table. A canonical field absent
+    # from `values` means either the confirmed spec never mapped it (an
+    # older spec, from before this field existed — not this record's
+    # problem to fail on) or app.record_builder already reported
+    # MISSING_REQUIRED for it and deliberately left it out of `values`
+    # (see apply_spec_to_row's docstring) — either way, re-flagging a
+    # column that plain isn't present as a Pandera nullable violation
+    # would be a second, wrong error for the same thing, or (for a field
+    # the current spec never mapped at all) a false positive entirely.
+    # Confirmed via Day 6's schema-evolution work: adding a new required
+    # canonical field broke every old batch's reload until this scoped
+    # to `values`'s own keys.
+    checked_columns = [name for name in schema.columns if name in values]
+    if not checked_columns:
+        return []
+
+    # Pandera errors on a schema-declared column that's entirely absent
+    # from the dataframe (a "column_in_dataframe" failure), independent
+    # of that column's nullable setting -- so it's not enough to just
+    # fill absent columns with None; the schema itself must be narrowed
+    # to only the columns actually being checked this call.
+    subset_schema = pa.DataFrameSchema({name: schema.columns[name] for name in checked_columns})
+    row = {name: [values.get(name)] for name in checked_columns}
     # dtype=object is required here: pandas auto-infers a concrete dtype
     # (e.g. int64) from a single-value column, which then mismatches this
     # schema's declared `object` dtype for every column regardless of the
@@ -59,7 +82,7 @@ def validate_schema(target_table: str, values: dict) -> list[FieldError]:
     # failure.
     df = pd.DataFrame(row, dtype=object)
     try:
-        schema.validate(df, lazy=True)
+        subset_schema.validate(df, lazy=True)
     except pa.errors.SchemaErrors as exc:
         errors = []
         for _, failure in exc.failure_cases.iterrows():

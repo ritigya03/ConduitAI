@@ -115,6 +115,60 @@ class Quarantine(SQLModel, table=True):
     status: str = Field(default="open")  # open | fixed | ignored | resubmitted
 
 
+class CustomerDuplicateCandidate(SQLModel, table=True):
+    """A probable-duplicate customer pair found by app.dedupe's Splink
+    pass -- "same customer, different spelling" (Day 6). Separate from
+    Quarantine: this flags two already-*loaded* customers as probably
+    the same entity, not a single row that failed to load."""
+
+    __tablename__ = "customer_duplicate_candidates"
+    __table_args__ = (
+        UniqueConstraint(
+            "tenant_id", "customer_id_a", "customer_id_b", name="uq_dup_candidate_tenant_pair"
+        ),
+    )
+
+    id: UUID = Field(default_factory=uuid4, primary_key=True)
+    tenant_id: str = Field(index=True)
+    # customer_id_a is always the lexicographically-smaller UUID string of
+    # the pair -- normalizing pair order this way means re-running the
+    # dedupe pass upserts into the same row instead of creating a
+    # mirror-image duplicate every time.
+    #
+    # Deliberately NOT a DB-enforced foreign_key: a "merged" resolution
+    # deletes the loser Customer row, and this record is meant to survive
+    # as a permanent audit trail of that decision -- a hard FK would make
+    # that delete impossible (found by running the merge test for real).
+    customer_id_a: UUID
+    customer_id_b: UUID
+    match_probability: float
+    status: str = Field(default="open")  # open | merged | dismissed
+    created_at: datetime = Field(default_factory=_utcnow)
+
+
+class IdempotencyKey(SQLModel, table=True):
+    """Stores a completed response per (tenant, endpoint, client-supplied
+    key) so a retried request replays the original result instead of
+    reprocessing -- the Stripe-style Idempotency-Key pattern (Day 6).
+    Complementary to the content-hash idempotency `OnboardingBatch`
+    already has: this guards against a *retried request*, not duplicate
+    *content*."""
+
+    __tablename__ = "idempotency_keys"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "endpoint", "key", name="uq_idempotency_tenant_endpoint_key"),
+    )
+
+    id: UUID = Field(default_factory=uuid4, primary_key=True)
+    tenant_id: str = Field(index=True)
+    endpoint: str
+    key: str
+    request_fingerprint: str
+    status_code: int
+    response_json: dict = Field(default_factory=dict, sa_column=Column(JSONB))
+    created_at: datetime = Field(default_factory=_utcnow)
+
+
 class Customer(SQLModel, table=True):
     __tablename__ = "customers"
     __table_args__ = (
@@ -134,6 +188,7 @@ class Customer(SQLModel, table=True):
     vat_number: str | None = None
     employee_count: int | None = None
     region: str | None = None
+    kyc_status: str
     created_at: datetime = Field(default_factory=_utcnow)
     updated_at: datetime = Field(default_factory=_utcnow)
     content_hash: str

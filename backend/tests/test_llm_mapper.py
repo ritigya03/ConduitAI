@@ -1,8 +1,13 @@
+import time
+from unittest.mock import patch
+
+import httpx
 import pytest
+from openai import APITimeoutError
 from pydantic import ValidationError
 
 from app.canonical import get_field
-from app.llm_mapper import _build_decision_model, _build_user_prompt, tiebreak
+from app.llm_mapper import _build_decision_model, _build_user_prompt, _call_provider_with_retry, tiebreak
 from app.profiling import ColumnStats
 
 
@@ -104,3 +109,57 @@ def test_tiebreak_skips_groq_when_no_api_key(monkeypatch):
 
     assert len(calls) == 1
     assert "11434" in calls[0]
+
+
+def _timeout_error() -> APITimeoutError:
+    return APITimeoutError(request=httpx.Request("POST", "http://example.invalid"))
+
+
+def test_call_provider_with_retry_retries_on_timeout_then_succeeds():
+    attempts = []
+
+    def flaky(**kwargs):
+        attempts.append(time.monotonic())
+        if len(attempts) < 3:
+            raise _timeout_error()
+        return "success"
+
+    with patch("app.llm_mapper._call_provider", side_effect=flaky):
+        result = _call_provider_with_retry(
+            base_url="http://example.invalid", api_key="x", model="m", response_model=str, user_prompt="p"
+        )
+
+    assert result == "success"
+    assert len(attempts) == 3
+    # exponential backoff: the second wait should not be shorter than the first
+    gaps = [attempts[i + 1] - attempts[i] for i in range(len(attempts) - 1)]
+    assert gaps[1] > gaps[0] * 0.8
+
+
+def test_call_provider_with_retry_gives_up_after_max_attempts():
+    def always_fails(**kwargs):
+        raise _timeout_error()
+
+    with patch("app.llm_mapper._call_provider", side_effect=always_fails) as mock_call:
+        with pytest.raises(APITimeoutError):
+            _call_provider_with_retry(
+                base_url="http://example.invalid", api_key="x", model="m", response_model=str, user_prompt="p"
+            )
+    assert mock_call.call_count == 3
+
+
+def test_call_provider_with_retry_does_not_retry_non_transient_errors():
+    """A validation/auth error should propagate on the first attempt --
+    retrying it 3 times before falling through to the next provider
+    would just slow down the existing Groq -> Ollama fallback for no
+    benefit."""
+
+    def always_fails(**kwargs):
+        raise RuntimeError("bad api key")
+
+    with patch("app.llm_mapper._call_provider", side_effect=always_fails) as mock_call:
+        with pytest.raises(RuntimeError):
+            _call_provider_with_retry(
+                base_url="http://example.invalid", api_key="x", model="m", response_model=str, user_prompt="p"
+            )
+    assert mock_call.call_count == 1

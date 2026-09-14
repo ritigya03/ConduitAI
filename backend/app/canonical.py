@@ -111,6 +111,20 @@ CANONICAL_FIELDS: list[CanonicalField] = [
         aliases=["risk_tier", "risk", "risk_level", "risk_class"],
         enum_values=["low", "medium", "high"],
     ),
+    # Added Day 6 -- the schema-evolution demo's new required field. Not
+    # backdated onto risk_tier above (which already existed, optional,
+    # since Day 1) so the "customer adds a genuinely new required field"
+    # narrative stays honest.
+    CanonicalField(
+        name="kyc_status",
+        target_table="customers",
+        target_column="kyc_status",
+        type=FieldType.ENUM,
+        required=True,
+        description="Know-Your-Customer verification status for this customer record.",
+        aliases=["kyc_status", "kyc", "kyc_state", "verification_status"],
+        enum_values=["pending", "verified", "rejected"],
+    ),
     CanonicalField(
         name="customer_created_at",
         target_table="customers",

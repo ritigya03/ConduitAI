@@ -1,0 +1,22 @@
+[project]
+name = "conduitai-mock-crm"
+version = "0.1.0"
+description = "Deliberately messy mock CRM API for ConduitAI's 'connect API' ingestion path"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.32.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3.0",
+    "httpx>=0.27.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["app"]

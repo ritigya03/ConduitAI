@@ -107,6 +107,29 @@ def test_mapping_spec_versions_increment_on_repeat_calls(unique_tenant_id):
         assert len(specs) == 2
 
 
+def test_mapping_spec_with_idempotency_key_does_not_create_a_second_version(unique_tenant_id):
+    batch_id = _upload_tiny_crm(unique_tenant_id)
+
+    first = client.post(
+        "/mapping-spec",
+        data={"tenant_id": unique_tenant_id, "batch_id": batch_id},
+        headers={"Idempotency-Key": "spec-replay-key"},
+    )
+    second = client.post(
+        "/mapping-spec",
+        data={"tenant_id": unique_tenant_id, "batch_id": batch_id},
+        headers={"Idempotency-Key": "spec-replay-key"},
+    )
+    assert first.json()["mapping_spec_id"] == second.json()["mapping_spec_id"]
+    assert first.json()["version"] == second.json()["version"] == 1
+
+    with Session(engine) as session:
+        specs = session.exec(
+            select(MappingSpec).where(MappingSpec.tenant_id == unique_tenant_id)
+        ).all()
+        assert len(specs) == 1  # not 2
+
+
 def test_mapping_spec_unknown_batch_returns_404(unique_tenant_id):
     response = client.post(
         "/mapping-spec",

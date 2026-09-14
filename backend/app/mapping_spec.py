@@ -23,7 +23,7 @@ class MappingSpecNotFound(Exception):
 
 
 class MappingSpecNotDraft(Exception):
-    """Only a "draft" spec can be confirmed — it's already confirmed or superseded."""
+    """Only a "draft" spec can be confirmed or edited — it's already confirmed or superseded."""
 
 
 _TRANSFORM_BY_FIELD_TYPE: dict[FieldType, dict] = {
@@ -110,6 +110,48 @@ def save_mapping_spec(
         status="draft",
         parent_version=parent_version,
     )
+    session.add(spec)
+    session.commit()
+    session.refresh(spec)
+    return spec
+
+
+def update_spec_json(
+    session: Session, tenant_id: str, mapping_spec_id: UUID, overrides: dict[str, dict | None]
+) -> MappingSpec:
+    """Merges `overrides` into a **draft** spec's `spec_json` — Day 5's
+    review UI override action, exposed as a real endpoint instead of the
+    Day 4 test-only DB poke (`_apply_human_corrections`) this mirrors.
+    Each key is a canonical field name; a dict value sets/replaces that
+    field's entry (same `{source_column, transform, provenance}` shape
+    `build_spec_entries` produces), a `None` value removes the field from
+    the spec entirely (the review grid's "None of these" override). An
+    entry may omit `transform`/`provenance` — a reviewer picking a new
+    field for a column knows the field's *name*, not its canonical type
+    or how to describe its own provenance, so a bare `{"source_column":
+    ...}` is filled in here: `transform` from the field's registered
+    type (same lookup `build_spec_entries` uses), `provenance` defaulted
+    to `{"method": "human", ...}`."""
+    spec = session.get(MappingSpec, mapping_spec_id)
+    if spec is None or spec.tenant_id != tenant_id:
+        raise MappingSpecNotFound(f"No mapping spec {mapping_spec_id} for tenant {tenant_id}")
+    if spec.status != "draft":
+        raise MappingSpecNotDraft(f"Mapping spec {mapping_spec_id} is {spec.status!r}, not draft")
+
+    updated = dict(spec.spec_json)
+    for field_name, entry in overrides.items():
+        if entry is None:
+            updated.pop(field_name, None)
+            continue
+
+        entry = dict(entry)
+        if "transform" not in entry:
+            entry["transform"] = _TRANSFORM_BY_FIELD_TYPE[get_field(field_name).type]
+        if "provenance" not in entry:
+            entry["provenance"] = {"method": "human", "model": None, "confidence": None, "reasoning": None}
+        updated[field_name] = entry
+
+    spec.spec_json = updated
     session.add(spec)
     session.commit()
     session.refresh(spec)

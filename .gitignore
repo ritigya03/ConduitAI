@@ -4,4 +4,8 @@ backend/**/__pycache__/
 backend/.pytest_cache/
 backend/seed/output/
 backend/reports/*.html
+mock-crm/.venv/
+mock-crm/__pycache__/
+mock-crm/**/__pycache__/
+mock-crm/.pytest_cache/
 .env

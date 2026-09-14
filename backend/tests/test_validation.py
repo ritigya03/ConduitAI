@@ -43,10 +43,23 @@ def test_schema_accepts_valid_customer_record():
     assert validate_schema("customers", values) == []
 
 
-def test_schema_rejects_missing_required_column():
+def test_schema_does_not_flag_a_required_column_that_is_entirely_absent():
+    """Rewritten for Day 6 (was test_schema_rejects_missing_required_column,
+    which asserted the opposite). validate_schema only type-checks columns
+    `values` actually has an entry for -- "is this required field present
+    at all" is app.record_builder's job (MISSING_REQUIRED), driven by
+    whether the *confirmed mapping spec* maps the field. A canonical field
+    absent from `values` means either record_builder already reported
+    MISSING_REQUIRED for it (redundant to also fail schema validation), or
+    -- the case that surfaced this -- the spec simply predates the field
+    (Day 6's kyc_status: an old, still-valid confirmed spec created before
+    kyc_status existed). Blanket-flagging every registered-but-absent
+    column here would retroactively break every batch loaded under an
+    older spec the moment a new required field is added, which is exactly
+    what the "add a required field mid-project" demo (Day 6) must not do."""
     values = {"legal_name": "Acme Corp"}  # natural_key required, absent entirely
     errors = validate_schema("customers", values)
-    assert any(e.code == "SCHEMA_VALIDATION_FAILED" for e in errors)
+    assert errors == []
 
 
 def test_schema_rejects_wrong_python_type():

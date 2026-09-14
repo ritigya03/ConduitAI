@@ -14,12 +14,20 @@ from typing import Literal
 
 import instructor
 from instructor import from_openai
-from openai import OpenAI
+from openai import APIConnectionError, APITimeoutError, OpenAI, RateLimitError
 from pydantic import BaseModel, create_model
+from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 
 from app.canonical import CanonicalField
 from app.config import settings
 from app.profiling import ColumnStats
+
+# Only retry genuinely transient failure modes -- an auth error or a
+# malformed-response validation error (Instructor's own domain, already
+# handled by _call_provider's own max_retries=2) should fall through to
+# the next provider immediately via tiebreak's existing broad
+# `except Exception` fallback, not eat 3 more retries first.
+_RETRYABLE_EXCEPTIONS = (APITimeoutError, APIConnectionError, RateLimitError)
 
 # Groq's model roster changes over time — verify with
 # `curl https://api.groq.com/openai/v1/models -H "Authorization: Bearer $GROQ_API_KEY"`
@@ -98,6 +106,16 @@ def _call_provider(
     )
 
 
+@retry(
+    retry=retry_if_exception_type(_RETRYABLE_EXCEPTIONS),
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=0.5, min=0.5, max=4),
+    reraise=True,
+)
+def _call_provider_with_retry(**kwargs) -> BaseModel:
+    return _call_provider(**kwargs)
+
+
 def tiebreak(
     column_name: str, stats: ColumnStats, candidates: list[CanonicalField]
 ) -> LLMDecision | None:
@@ -109,7 +127,7 @@ def tiebreak(
 
     if settings.groq_api_key:
         try:
-            result = _call_provider(
+            result = _call_provider_with_retry(
                 base_url=_GROQ_BASE_URL,
                 api_key=settings.groq_api_key,
                 model=_GROQ_MODEL,
@@ -126,7 +144,7 @@ def tiebreak(
             pass  # fall through to Ollama
 
     try:
-        result = _call_provider(
+        result = _call_provider_with_retry(
             base_url=settings.ollama_base_url,
             api_key="ollama",  # Ollama ignores the key but the OpenAI client requires one
             model=_OLLAMA_MODEL,

@@ -2,6 +2,14 @@
 database. Resolves the "linking" customer key, checks referential
 integrity and within-batch exact duplicates, upserts valid rows
 idempotently, and quarantines the rest — a whole raw row at a time.
+
+`process_row` is the single-row core of this: transform + validate +
+resolve-customer-link + upsert-or-report-errors for one raw row. It's
+shared by `load_batch` (which loops it over a whole batch, threading a
+`seen_natural_keys` dict through for batch-scoped exact-duplicate
+detection) and Day 5's quarantine resolve/bulk-resolve endpoints
+(`app.routers.quarantine`), which call it one row at a time to re-attempt
+a previously-quarantined row after a human correction.
 """
 
 import hashlib
@@ -49,12 +57,20 @@ class LoadSummary(BaseModel):
     quarantined: int
 
 
+class RowResult(BaseModel):
+    """Outcome of running `process_row` on one raw row."""
+
+    loaded: bool
+    errors: list[dict] = []
+    suggested_fix: str | None = None
+
+
 def _content_hash(values: dict) -> str:
     canonical = json.dumps(values, sort_keys=True, default=str)
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
-def _get_confirmed_spec(session: Session, tenant_id: str, source_id: UUID) -> MappingSpec | None:
+def get_confirmed_spec(session: Session, tenant_id: str, source_id: UUID) -> MappingSpec | None:
     return session.exec(
         select(MappingSpec).where(
             MappingSpec.tenant_id == tenant_id,
@@ -169,8 +185,86 @@ def _find_or_create_account(
         session.add(Account(tenant_id=tenant_id, customer_id=customer_id, **values))
 
 
+def process_row(
+    session: Session,
+    tenant_id: str,
+    spec: MappingSpec,
+    raw_json: dict,
+    batch_id: UUID,
+    seen_natural_keys: dict[str, set[str]] | None = None,
+) -> RowResult:
+    """Transforms, validates, resolves the customer link, and — if
+    valid — upserts one raw row. `seen_natural_keys` is an in/out dict
+    used for within-batch exact-duplicate detection; `load_batch` threads
+    one shared dict across every row in a batch, while a single-row
+    caller (quarantine resolve/bulk-resolve) leaves it as a fresh dict —
+    there's no "second occurrence" concept for a single row processed on
+    its own."""
+    if seen_natural_keys is None:
+        seen_natural_keys = {}
+
+    built_records = apply_spec_to_row(spec.spec_json, raw_json)
+    row_errors: list[dict] = [e.model_dump() for r in built_records for e in r.errors]
+
+    row_customer_key = next(
+        (r.customer_natural_key for r in built_records if r.customer_natural_key), None
+    )
+
+    for record in built_records:
+        row_errors.extend(e.model_dump() for e in validate_business_rules(record.target_table, record.values))
+        row_errors.extend(e.model_dump() for e in validate_schema(record.target_table, record.values))
+
+    for record in built_records:
+        if record.target_table not in _NATURAL_KEY_MODELS:
+            continue
+        natural_key = record.values.get("natural_key")
+        if natural_key is None:
+            continue
+        seen = seen_natural_keys.setdefault(record.target_table, set())
+        if natural_key in seen:
+            row_errors.append(
+                {"field": "natural_key", "code": "DUPLICATE_EXACT", "raw_value": natural_key}
+            )
+        else:
+            seen.add(natural_key)
+
+    resolved_customer_id: UUID | None = None
+    suggested_fix: str | None = None
+    needs_customer = any(r.target_table in _LINKED_TABLES for r in built_records)
+    if needs_customer:
+        effective_key = next(
+            (r.customer_natural_key for r in built_records if r.target_table != "accounts" and r.customer_natural_key),
+            row_customer_key,
+        )
+        if effective_key is not None:
+            resolved_customer_id = _resolve_customer_id(session, tenant_id, effective_key)
+            if resolved_customer_id is None:
+                row_errors.append(
+                    {"field": "customer_id", "code": "REF_INTEGRITY_ORPHAN_FK", "raw_value": effective_key}
+                )
+                suggested_fix = _suggest_customer_fix(session, tenant_id, effective_key)
+            # effective_key is None only when the required linking field
+            # itself failed (already recorded as MISSING_REQUIRED above) —
+            # no need for a second, redundant orphan-FK error on top of it.
+
+    if row_errors:
+        return RowResult(loaded=False, errors=row_errors, suggested_fix=suggested_fix)
+
+    for record in built_records:
+        if record.target_table == "customers":
+            _upsert_customer(session, tenant_id, record.values, batch_id)
+        elif record.target_table == "invoices":
+            _upsert_linked_record(session, Invoice, tenant_id, record.values, resolved_customer_id, batch_id)
+        elif record.target_table == "support_tickets":
+            _upsert_linked_record(session, SupportTicket, tenant_id, record.values, resolved_customer_id, batch_id)
+        elif record.target_table == "accounts":
+            _find_or_create_account(session, tenant_id, record.values, resolved_customer_id)
+
+    return RowResult(loaded=True, errors=[], suggested_fix=None)
+
+
 def load_batch(session: Session, tenant_id: str, batch: OnboardingBatch) -> LoadSummary:
-    spec = _get_confirmed_spec(session, tenant_id, batch.source_id)
+    spec = get_confirmed_spec(session, tenant_id, batch.source_id)
     if spec is None:
         raise NoConfirmedMappingSpec(
             f"No confirmed mapping spec for source {batch.source_id} (tenant {tenant_id})"
@@ -188,52 +282,10 @@ def load_batch(session: Session, tenant_id: str, batch: OnboardingBatch) -> Load
     quarantined = 0
 
     for row in raw_rows:
-        built_records = apply_spec_to_row(spec.spec_json, row.raw_json)
-        row_errors: list[dict] = [e.model_dump() for r in built_records for e in r.errors]
+        result = process_row(session, tenant_id, spec, row.raw_json, batch.id, seen_natural_keys)
 
-        row_customer_key = next(
-            (r.customer_natural_key for r in built_records if r.customer_natural_key), None
-        )
-
-        for record in built_records:
-            row_errors.extend(e.model_dump() for e in validate_business_rules(record.target_table, record.values))
-            row_errors.extend(e.model_dump() for e in validate_schema(record.target_table, record.values))
-
-        for record in built_records:
-            if record.target_table not in _NATURAL_KEY_MODELS:
-                continue
-            natural_key = record.values.get("natural_key")
-            if natural_key is None:
-                continue
-            seen = seen_natural_keys.setdefault(record.target_table, set())
-            if natural_key in seen:
-                row_errors.append(
-                    {"field": "natural_key", "code": "DUPLICATE_EXACT", "raw_value": natural_key}
-                )
-            else:
-                seen.add(natural_key)
-
-        resolved_customer_id: UUID | None = None
-        suggested_fix: str | None = None
-        needs_customer = any(r.target_table in _LINKED_TABLES for r in built_records)
-        if needs_customer:
-            effective_key = next(
-                (r.customer_natural_key for r in built_records if r.target_table != "accounts" and r.customer_natural_key),
-                row_customer_key,
-            )
-            if effective_key is not None:
-                resolved_customer_id = _resolve_customer_id(session, tenant_id, effective_key)
-                if resolved_customer_id is None:
-                    row_errors.append(
-                        {"field": "customer_id", "code": "REF_INTEGRITY_ORPHAN_FK", "raw_value": effective_key}
-                    )
-                    suggested_fix = _suggest_customer_fix(session, tenant_id, effective_key)
-            # effective_key is None only when the required linking field
-            # itself failed (already recorded as MISSING_REQUIRED above) —
-            # no need for a second, redundant orphan-FK error on top of it.
-
-        if row_errors:
-            error_codes = sorted({e["code"] for e in row_errors})
+        if not result.loaded:
+            error_codes = sorted({e["code"] for e in result.errors})
             session.add(
                 Quarantine(
                     tenant_id=tenant_id,
@@ -241,23 +293,14 @@ def load_batch(session: Session, tenant_id: str, batch: OnboardingBatch) -> Load
                     raw_record_json=row.raw_json,
                     error_codes=error_codes,
                     severity="error",
-                    explanation="; ".join(f"{e['field']}: {e['code']}" for e in row_errors),
-                    suggested_fix=suggested_fix,
+                    explanation="; ".join(f"{e['field']}: {e['code']}" for e in result.errors),
+                    suggested_fix=result.suggested_fix,
                     status="open",
                 )
             )
             quarantined += 1
             continue
 
-        for record in built_records:
-            if record.target_table == "customers":
-                _upsert_customer(session, tenant_id, record.values, batch.id)
-            elif record.target_table == "invoices":
-                _upsert_linked_record(session, Invoice, tenant_id, record.values, resolved_customer_id, batch.id)
-            elif record.target_table == "support_tickets":
-                _upsert_linked_record(session, SupportTicket, tenant_id, record.values, resolved_customer_id, batch.id)
-            elif record.target_table == "accounts":
-                _find_or_create_account(session, tenant_id, record.values, resolved_customer_id)
         loaded += 1
 
     batch.mapping_spec_version = spec.version

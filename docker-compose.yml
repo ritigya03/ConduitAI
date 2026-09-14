@@ -23,13 +23,25 @@ services:
     environment:
       DATABASE_URL: postgresql+psycopg://conduit:conduit@db:5432/conduitai
       ENVIRONMENT: development
+      MOCK_CRM_BASE_URL: http://mock-crm:8100
+      MOCK_CRM_API_TOKEN: mock-crm-demo-token
     depends_on:
       db:
         condition: service_healthy
+      mock-crm:
+        condition: service_started
     volumes:
       - ./backend/app:/code/app
       - ./backend/alembic:/code/alembic
       - ./backend/reports:/code/reports
+
+  mock-crm:
+    build:
+      context: ./mock-crm
+    ports:
+      - "8100:8100"
+    environment:
+      MOCK_CRM_API_TOKEN: mock-crm-demo-token
 
 volumes:
   conduit_pgdata:
