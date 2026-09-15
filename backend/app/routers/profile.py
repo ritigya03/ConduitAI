@@ -20,6 +20,7 @@ from fastapi import APIRouter, Depends, Form, HTTPException, Query
 from fastapi.responses import RedirectResponse
 from sqlmodel import Session, select
 
+from app.config import settings
 from app.db import get_session
 from app.models import ColumnProfile, OnboardingBatch, RawRecord, Source
 from app.profiling import build_dataframe, profile_all_columns
@@ -117,6 +118,14 @@ def view_report(
     batch = session.get(OnboardingBatch, batch_uuid)
     if batch is None or batch.tenant_id != tenant_id:
         raise HTTPException(status_code=404, detail="Batch not found")
+
+    if not settings.enable_html_reports:
+        raise HTTPException(
+            status_code=503,
+            detail="Full HTML report generation is disabled on this deployment "
+            "(ydata-profiling needs more memory than this host provides). "
+            "Run locally via Docker Compose for the full report.",
+        )
 
     report_path = REPORTS_DIR / f"{batch_id}.html"
     if not report_path.exists():

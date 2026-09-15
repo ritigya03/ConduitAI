@@ -15,6 +15,12 @@ class Settings(BaseSettings):
     # here via the CORS_ALLOWED_ORIGINS env var -- local dev's default
     # covers itself without any config needed.
     cors_allowed_origins: str = "http://localhost:3000"
+    # ydata-profiling (pandas + matplotlib + scipy) OOM-crashes on Render's
+    # free 512MB tier even in isolation, with nothing else loaded -- a real
+    # OS-level kill, not something a try/except can catch. Off by default
+    # on constrained deploys; on for local/Docker Compose, which has no
+    # memory cap. Set ENABLE_HTML_REPORTS=true to force it on.
+    enable_html_reports: bool = True
 
     @property
     def cors_allowed_origins_list(self) -> list[str]:
