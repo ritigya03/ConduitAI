@@ -120,6 +120,16 @@ This is the real, honest story. Hybrid alone actually *dips below* baseline here
 
 ---
 
+## Day 7 — Packaging
+
+**Built:** rewrote `README.md` (architecture diagram, quickstart, canonical schema, real benchmark numbers, live pipeline timing), `docs/PRODUCTION.md` (VPC network topology, PII handling, what changes at real scale), `docs/DEMO_SCRIPT.md` (6-beat timestamped recording script), `docs/DEPLOY.md`, `render.yaml`. Seeded a realistic populated `demo-tenant` dataset (4 sources, 55 customers, 9 open quarantine rows across 5 error codes, 2 dedupe candidates) both locally and on the live deployment. Deployed for real: **Neon** (Postgres) + **Render** (`conduitai-api`, `conduitai-mock-crm`, both Docker) + **Vercel** (frontend) — [conduit-ai-eosin.vercel.app](https://conduit-ai-eosin.vercel.app).
+
+**Two real bugs found deploying for real, not just writing configs:**
+1. **CORS was hardcoded to `localhost:3000`** — the deployed frontend literally could not have called the deployed backend. Made configurable via `CORS_ALLOWED_ORIGINS`.
+2. **The deployed API crashed (OOM) on `/profile`/`/mapping-spec`** on Render's free 512MB tier. Root cause: `app.report`'s `ydata-profiling` import (pandas/matplotlib/scipy) and `app.scoring`'s `fastembed` embedding-model load both peaked in the *same request* — `/profile` called `generate_report()` inline on every call. First fix (deferring the module-level `ydata-profiling` import to call-time) reduced idle baseline but didn't touch peak-during-request memory, and still crashed. Real fix: report generation is now fully lazy — a dedicated `GET /profile/{batch_id}/report` endpoint that generates-once-then-serves, called only when a reviewer clicks "Full report," never bundled into the hot mapping-review path. Verified live afterward: full upload→profile→map→confirm→load pipeline, repeatedly, no crashes.
+
+**Not done in this session:** the recorded video itself (no screen-recording capability available) — `docs/DEMO_SCRIPT.md` is the ready-to-follow shot list for whoever records it.
+
 ## Where things stand
 
 - **Tests:** 181 backend tests passing (`backend/`) + 6 (`mock-crm/`), verified re-runnable across repeat runs. No frontend test suite (Day 5 scoped that to a manual walkthrough).

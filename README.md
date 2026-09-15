@@ -1,5 +1,7 @@
 # ConduitAI
 
+**Live demo:** [conduit-ai-eosin.vercel.app](https://conduit-ai-eosin.vercel.app) (frontend) · [conduitai-api.onrender.com/docs](https://conduitai-api.onrender.com/docs) (API). Free-tier hosting (Render) sleeps after 15 min idle — the first request after a while may take ~30-60s to wake up.
+
 Customer data onboarding is where every B2B integration project actually dies: a new customer's CRM/billing/support export never matches your schema, someone hand-maps it once in a spreadsheet, and six months later nobody remembers why `cust_id` became `natural_key` or what happens when the customer adds a field. ConduitAI is a working, end-to-end onboarding pipeline built to answer the question a Forward-Deployed Engineer actually gets paid to answer: **how do you turn "the customer's data doesn't look like your schema" into a repeatable, auditable, non-scary process** — instead of a one-off script nobody trusts a second time.
 
 Upload a messy CSV (or pull one live from a source system's API) and it gets profiled, its columns get proposed against a canonical schema — deterministic signals first, an LLM only for the genuinely ambiguous leftovers — a human reviews and confirms the mapping, and only then does a deterministic, fully-tested transform engine load it. Every mapping is a versioned, diffable JSON document. Every rejected row is visible, explained, and fixable, never silently dropped. Every load is idempotent, so retrying is always safe.

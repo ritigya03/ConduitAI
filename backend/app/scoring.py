@@ -83,6 +83,16 @@ def _field_embeddings() -> dict[str, list[float]]:
     return dict(zip(names, vectors))
 
 
+def warm_up() -> None:
+    """Forces both lru_cached loads (the ONNX model download/load, and
+    the one-time canonical-field embedding pass) to happen now, not on
+    whichever user's request happens to be first. Call once at process
+    startup (see app.main's lifespan) — on a slow/free-tier CPU this is
+    the difference between "the app is ready" meaning ready, and a
+    user's first /profile click eating a 15-30s model load."""
+    _field_embeddings()
+
+
 def _normalize_column_name(name: str) -> str:
     split_camel = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", " ", name)
     return split_camel.replace("_", " ").replace("-", " ").lower().strip()

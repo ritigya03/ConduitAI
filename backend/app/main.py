@@ -46,6 +46,18 @@ app.include_router(connect_router)
 app.include_router(dedupe_router)
 
 
+@app.on_event("startup")
+def _warm_up_embedding_model() -> None:
+    # Forces fastembed's ONNX model download/load to happen at container
+    # boot, not on whichever user's request happens to hit /profile or
+    # /mapping-spec first -- on a slow/free-tier CPU that first load can
+    # take 15-30s, which otherwise reads as "the app is broken," not
+    # "warming up." Runs once per process.
+    from app.scoring import warm_up
+
+    warm_up()
+
+
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
