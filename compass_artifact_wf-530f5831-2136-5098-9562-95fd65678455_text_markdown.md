@@ -252,7 +252,8 @@ Instrument these and show them on a dashboard (and store per-batch in `onboardin
 
 **Day 4 — Deterministic transform + validation + exception queue.** Transform engine (catalogue functions applying the spec). Pandera schema + custom business rules. Quarantine table + structured error objects + suggested fixes. Idempotent upsert load (natural key + content hash). *Deliverable: end-to-end upload→load with valid rows in canonical tables and bad rows in quarantine. **This is the Minimum Demoable Product (MDP).***
 
-**Day 5 — Frontend review UI.** Next.js + shadcn/ui + TanStack Table (v8): upload page, mapping-review grid (accept/override, confidence badges, samples), exception queue view with bulk-fix, and a metrics dashboard. (If behind: **Streamlit** version of the same three screens.) *Deliverable: clickable UI over the whole flow.*
+
+
 
 **Day 6 — Idempotency, retries, schema-evolution demo, mock API.** Idempotency-Key handling; retry/backoff; the mock-CRM service + "connect API" path. Rehearse the **add-a-required-field** live change (migration + spec v+1 + re-run). Add Splink fuzzy dedupe. *Deliverable: the "pivot" demo works.*
 
