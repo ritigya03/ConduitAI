@@ -1,9 +1,10 @@
+from pathlib import Path
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from app.config import settings
-from app.report import REPORTS_DIR
 from app.routers.connect import router as connect_router
 from app.routers.dedupe import router as dedupe_router
 from app.routers.load import router as load_router
@@ -24,7 +25,14 @@ app.add_middleware(
 
 # Serves the ydata-profiling HTML reports app.report generates, so the
 # frontend's profile page can link straight to `{API_BASE}/reports/{batch_id}.html`
-# instead of needing a dedicated download endpoint.
+# instead of needing a dedicated download endpoint. REPORTS_DIR is
+# computed directly here (matching app.report's own definition) rather
+# than imported from app.report -- importing that module pulls in
+# ydata-profiling's full dependency chain (pandas, matplotlib, scipy...)
+# at *app startup*, on every process, whether or not /profile is ever
+# called. On a memory-constrained deployment that's a real cost paid for
+# nothing (found running this for real on Render's free 512MB tier).
+REPORTS_DIR = Path(__file__).resolve().parent.parent / "reports"
 REPORTS_DIR.mkdir(parents=True, exist_ok=True)
 app.mount("/reports", StaticFiles(directory=REPORTS_DIR), name="reports")
 
