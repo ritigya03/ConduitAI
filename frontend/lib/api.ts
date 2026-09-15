@@ -49,10 +49,12 @@ async function apiGet<T>(path: string, params: Record<string, string | undefined
   return res.json();
 }
 
-/** URL for the ydata-profiling HTML report app.report generates --
- * served statically by the backend's /reports mount (Task 0). */
+/** URL for the ydata-profiling HTML report -- generated lazily on first
+ * visit (Day 7: bundling report generation into every /profile call was
+ * crashing the service on a memory-constrained deploy), then redirected
+ * to the static file the backend's /reports mount serves. */
 export function reportUrl(batchId: string): string {
-  return `${API_BASE}/reports/${batchId}.html`;
+  return `${API_BASE}/profile/${batchId}/report?tenant_id=${TENANT_ID}`;
 }
 
 export const api = {

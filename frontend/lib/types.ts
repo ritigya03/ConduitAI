@@ -46,7 +46,6 @@ export interface ProfileColumn {
 export interface ProfileResponse {
   batch_id: string;
   columns: ProfileColumn[];
-  report_path: string;
 }
 
 export type ProvenanceMethod = "deterministic" | "llm" | "deterministic_fallback" | "human";

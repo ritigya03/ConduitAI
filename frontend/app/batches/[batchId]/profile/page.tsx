@@ -39,7 +39,6 @@ const columns: ColumnDef<ProfileColumn>[] = [
 export default function ProfilePage() {
   const { batchId } = useParams<{ batchId: string }>();
   const [data, setData] = useState<ProfileColumn[] | null>(null);
-  const [reportPath, setReportPath] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -51,7 +50,6 @@ export default function ProfilePage() {
       .then((response) => {
         if (cancelled) return;
         setData(response.columns);
-        setReportPath(response.report_path);
       })
       .catch((err) => {
         if (!cancelled) setError(err instanceof Error ? err.message : "Failed to profile batch");
@@ -69,13 +67,11 @@ export default function ProfilePage() {
           <p className="mt-1 font-mono text-xs text-muted-foreground">{batchId}</p>
         </div>
         <div className="flex items-center gap-2">
-          {reportPath && (
-            <Button asChild variant="outline" size="sm">
-              <a href={reportUrl(batchId)} target="_blank" rel="noreferrer">
-                Full report
-              </a>
-            </Button>
-          )}
+          <Button asChild variant="outline" size="sm">
+            <a href={reportUrl(batchId)} target="_blank" rel="noreferrer">
+              Full report
+            </a>
+          </Button>
           <Button asChild size="sm">
             <Link href={`/batches/${batchId}/mapping`}>Generate mapping</Link>
           </Button>

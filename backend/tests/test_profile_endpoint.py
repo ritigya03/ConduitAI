@@ -1,4 +1,3 @@
-from pathlib import Path
 from uuid import UUID
 
 from fastapi.testclient import TestClient
@@ -55,10 +54,7 @@ def test_profile_returns_ranked_candidates_for_every_column(unique_tenant_id):
         "account_customer_natural_key",
     }
     assert columns_by_name["customer_id"]["candidates"][0]["confidence"] >= 0.55
-
-    report_path = Path(body["report_path"])
-    assert report_path.exists()
-    assert report_path.parent == REPORTS_DIR
+    assert "report_path" not in body  # report generation is lazy now -- see test_view_report_*
 
 
 def test_profile_persists_column_profiles(unique_tenant_id):
@@ -111,3 +107,24 @@ def test_profile_invalid_batch_id_returns_400(unique_tenant_id):
         "/profile", data={"tenant_id": unique_tenant_id, "batch_id": "not-a-uuid"}
     )
     assert response.status_code == 400
+
+
+def test_view_report_generates_on_first_request(unique_tenant_id):
+    batch_id = _upload_tiny_crm(unique_tenant_id)
+    client.post("/profile", data={"tenant_id": unique_tenant_id, "batch_id": batch_id})
+
+    response = client.get(
+        f"/profile/{batch_id}/report", params={"tenant_id": unique_tenant_id}, follow_redirects=False
+    )
+
+    assert response.status_code == 307
+    assert response.headers["location"] == f"/reports/{batch_id}.html"
+    report_path = REPORTS_DIR / f"{batch_id}.html"
+    assert report_path.exists()
+
+
+def test_view_report_unknown_batch_returns_404(unique_tenant_id):
+    response = client.get(
+        "/profile/00000000-0000-0000-0000-000000000000/report", params={"tenant_id": unique_tenant_id}
+    )
+    assert response.status_code == 404

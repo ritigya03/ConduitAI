@@ -1,19 +1,29 @@
 """POST /profile — column profiling + deterministic mapping proposal.
+GET /reports/{batch_id}/view — the ydata-profiling HTML report, generated
+lazily on first request.
 
-Orchestrates app.profiling, app.report, and app.scoring against an
-already-uploaded batch's raw_records. No LLM calls, no MappingSpec
-persisted here — see app.scoring's module docstring for why.
+Orchestrates app.profiling and app.scoring against an already-uploaded
+batch's raw_records. No LLM calls, no MappingSpec persisted here — see
+app.scoring's module docstring for why. Report generation
+(app.report.generate_report) deliberately does NOT run inline in
+`/profile` — it pulls in ydata-profiling's full dependency chain
+(pandas, matplotlib, scipy) on top of app.scoring's own embedding-model
+load, and running both in the same request is exactly what was crashing
+this service on a memory-constrained deploy (Day 7's Render investigation
+— see docs/PROGRESS.md). Deferred to its own endpoint, called only when
+a reviewer actually clicks through to the full report.
 """
 
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Form, HTTPException
+from fastapi import APIRouter, Depends, Form, HTTPException, Query
+from fastapi.responses import RedirectResponse
 from sqlmodel import Session, select
 
 from app.db import get_session
 from app.models import ColumnProfile, OnboardingBatch, RawRecord, Source
 from app.profiling import build_dataframe, profile_all_columns
-from app.report import generate_report
+from app.report import REPORTS_DIR, generate_report
 from app.scoring import score_all_columns
 
 router = APIRouter()
@@ -51,8 +61,6 @@ def profile_batch(
         mapping.column_name: mapping
         for mapping in score_all_columns(stats_by_column, source_kind)
     }
-
-    report_path = generate_report(df, str(batch.id))
 
     columns_response = []
     for stats in stats_list:
@@ -92,5 +100,30 @@ def profile_batch(
     return {
         "batch_id": str(batch.id),
         "columns": columns_response,
-        "report_path": str(report_path),
     }
+
+
+@router.get("/profile/{batch_id}/report")
+def view_report(
+    batch_id: str,
+    tenant_id: str = Query(...),
+    session: Session = Depends(get_session),
+):
+    try:
+        batch_uuid = UUID(batch_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="batch_id must be a valid UUID")
+
+    batch = session.get(OnboardingBatch, batch_uuid)
+    if batch is None or batch.tenant_id != tenant_id:
+        raise HTTPException(status_code=404, detail="Batch not found")
+
+    report_path = REPORTS_DIR / f"{batch_id}.html"
+    if not report_path.exists():
+        raw_rows = session.exec(select(RawRecord).where(RawRecord.batch_id == batch.id)).all()
+        if not raw_rows:
+            raise HTTPException(status_code=400, detail="Batch has no raw records")
+        df = build_dataframe([row.raw_json for row in raw_rows])
+        generate_report(df, str(batch.id))
+
+    return RedirectResponse(url=f"/reports/{batch_id}.html")
